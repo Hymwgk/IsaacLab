@@ -47,8 +47,8 @@ FRAME_MARKER_SMALL_CFG.markers["frame"].scale = (0.10, 0.10, 0.10)
 
 
 @configclass
-class CabinetSceneCfg(InteractiveSceneCfg):
-    """Configuration for the cabinet scene with a robot and a cabinet.
+class TableSceneCfg(InteractiveSceneCfg):
+    """Configuration for the table scene with a robot and a table.
 
     This is the abstract base implementation, the exact scene is defined in the derived classes
     which need to set the robot and end-effector frames
@@ -79,11 +79,11 @@ class CabinetSceneCfg(InteractiveSceneCfg):
 
 
 
-    cabinet = ArticulationCfg(
+    table = ArticulationCfg(
         # 设置物体的路径，就是在场景树中相对于环境的路径
-        prim_path="{ENV_REGEX_NS}/Cabinet",
+        prim_path="{ENV_REGEX_NS}/Table",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Sektion_Cabinet/sektion_cabinet_instanceable.usd",
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Sektion_Table/sektion_table_instanceable.usd",
             activate_contact_sensors=False,
         ),
         # 设置初始状态
@@ -116,18 +116,22 @@ class CabinetSceneCfg(InteractiveSceneCfg):
         },
     )
 
+
+
+
+
     # 获取相对于柜子的变动的一些位置姿态（变换关系）
-    cabinet_frame = FrameTransformerCfg(
+    table_frame = FrameTransformerCfg(
         # 设置父坐标系的xform
-        prim_path="{ENV_REGEX_NS}/Cabinet/sektion",
+        prim_path="{ENV_REGEX_NS}/Table",
         debug_vis=False,
-        visualizer_cfg= FRAME_MARKER_SMALL_CFG.replace(prim_path="/Visuals/CabinetFrameTransformer"),
+        visualizer_cfg= FRAME_MARKER_SMALL_CFG.replace(prim_path="/Visuals/TableFrameTransformer"),
         target_frames=[
             # 手柄坐标系的名字还是“drawer_handle_top”
             FrameTransformerCfg.FrameCfg(
                 # 手柄坐标系在哪里？它要固定附着在场景中已经存在的参考系，两者“相对位姿固定”
-                # 在这里，用"{ENV_REGEX_NS}/Cabinet/drawer_handle_top"这个xform来作为附着对象
-                prim_path="{ENV_REGEX_NS}/Cabinet/drawer_handle_top",
+                # 在这里，用"{ENV_REGEX_NS}/Table/drawer_handle_top"这个xform来作为附着对象
+                prim_path="{ENV_REGEX_NS}/Table/drawer_handle_top",
                 # 手柄的坐标系的名称，它起了一个与prim_path中相同的名字
                 name="drawer_handle_top",
                 offset=OffsetCfg(
@@ -182,13 +186,13 @@ class ObservationsCfg:
         
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
-        cabinet_joint_pos = ObsTerm(
+        table_joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
-            params={"asset_cfg": SceneEntityCfg("cabinet", joint_names=["drawer_top_joint"])},
+            params={"asset_cfg": SceneEntityCfg("table", joint_names=["drawer_top_joint"])},
         )
-        cabinet_joint_vel = ObsTerm(
+        table_joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
-            params={"asset_cfg": SceneEntityCfg("cabinet", joint_names=["drawer_top_joint"])},
+            params={"asset_cfg": SceneEntityCfg("table", joint_names=["drawer_top_joint"])},
         )
         rel_ee_drawer_distance = ObsTerm(func=mdp.rel_ee_drawer_distance)
         actions = ObsTerm(func=mdp.last_action)
@@ -226,11 +230,11 @@ class EventCfg:
         },
     )
 
-    cabinet_physics_material = EventTerm(
+    table_physics_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("cabinet", body_names="drawer_handle_top"),
+            "asset_cfg": SceneEntityCfg("table", body_names="drawer_handle_top"),
             "static_friction_range": (1.0, 1.25),
             "dynamic_friction_range": (1.25, 1.5),
             "restitution_range": (0.0, 0.0),
@@ -275,12 +279,12 @@ class RewardsCfg:
     open_drawer_bonus = RewTerm(
         func=mdp.open_drawer_bonus,
         weight=7.5,
-        params={"asset_cfg": SceneEntityCfg("cabinet", joint_names=["drawer_top_joint"])},
+        params={"asset_cfg": SceneEntityCfg("table", joint_names=["drawer_top_joint"])},
     )
     multi_stage_open_drawer = RewTerm(
         func=mdp.multi_stage_open_drawer,
         weight=1.0,
-        params={"asset_cfg": SceneEntityCfg("cabinet", joint_names=["drawer_top_joint"])},
+        params={"asset_cfg": SceneEntityCfg("table", joint_names=["drawer_top_joint"])},
     )
 
     # 4. Penalize actions for cosmetic reasons
@@ -303,11 +307,11 @@ class TerminationsCfg:
 
 
 @configclass
-class CabinetEnvCfg(ManagerBasedRLEnvCfg):
-    """Configuration for the cabinet environment."""
+class TableEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the table environment."""
 
     # Scene settings
-    scene: CabinetSceneCfg = CabinetSceneCfg(num_envs=4096, env_spacing=2.0)
+    scene: TableSceneCfg = TableSceneCfg(num_envs=4096, env_spacing=2.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

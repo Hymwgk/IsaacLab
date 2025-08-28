@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from prettytable import PrettyTable
 from typing import TYPE_CHECKING
 
-import omni.kit.app
+
 
 from isaaclab.assets import AssetBase
 
