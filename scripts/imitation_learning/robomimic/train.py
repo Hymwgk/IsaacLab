@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -28,14 +28,19 @@
 """
 The main entry point for training policies from pre-collected data.
 
+This script loads dataset(s), creates a model based on the algorithm specified,
+and trains the model. It supports training on various environments with multiple
+algorithms from robomimic.
+
 Args:
-    algo: name of the algorithm to run.
-    task: name of the environment.
-    name: if provided, override the experiment name defined in the config
-    dataset: if provided, override the dataset path defined in the config
+    algo: Name of the algorithm to run.
+    task: Name of the environment.
+    name: If provided, override the experiment name defined in the config.
+    dataset: If provided, override the dataset path defined in the config.
+    log_dir: Directory to save logs.
+    normalize_training_actions: Whether to normalize actions in the training data.
 
-This file has been modified from the original version in the following ways:
-
+This file has been modified from the original robomimic version to integrate with IsaacLab.
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -48,11 +53,16 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+# Standard library imports
 import argparse
+
+# Third-party imports
 import gymnasium as gym
+import h5py
 import json
 import numpy as np
 import os
+import shutil
 import sys
 import time
 import torch
@@ -61,21 +71,110 @@ from collections import OrderedDict
 from torch.utils.data import DataLoader
 
 import psutil
+
+# Robomimic imports   进行了部分修改，使用最新的 robomimic 0.5.0
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.train_utils as TrainUtils
 from robomimic.algo import algo_factory
-from robomimic.config import config_factory
+from robomimic.config import Config, config_factory
 from robomimic.utils.log_utils import DataLogger, PrintLogger
 
-# Needed so that environment is registered
+# Isaac Lab imports (needed so that environment is registered)
 import isaaclab_tasks  # noqa: F401
+import isaaclab_tasks.manager_based.manipulation.opendrawer_bimanual  # noqa: F401
 
 
-def train(config, device):
-    """Train a model using the algorithm."""
+def normalize_hdf5_actions(config: Config, log_dir: str) -> str:
+    """Normalizes actions in hdf5 dataset to [-1, 1] range.
+
+    Args:
+        config: The configuration object containing dataset path.
+        log_dir: Directory to save normalization parameters.
+
+    Returns:
+        Path to the normalized dataset.
+    """
+    base, ext = os.path.splitext(config.train.data)
+    normalized_path = base + "_normalized" + ext
+
+    # Copy the original dataset
+    print(f"Creating normalized dataset at {normalized_path}")
+    shutil.copyfile(config.train.data, normalized_path)
+
+    # Open the new dataset and normalize the actions
+    with h5py.File(normalized_path, "r+") as f:
+        dataset_paths = [f"/data/demo_{str(i)}/actions" for i in range(len(f["data"].keys()))]
+
+        # Compute the min and max of the dataset
+        dataset = np.array(f[dataset_paths[0]]).flatten()
+        for i, path in enumerate(dataset_paths):
+            if i != 0:
+                data = np.array(f[path]).flatten()
+                dataset = np.append(dataset, data)
+
+        max = np.max(dataset)
+        min = np.min(dataset)
+
+        # Normalize the actions
+        for i, path in enumerate(dataset_paths):
+            data = np.array(f[path])
+            normalized_data = 2 * ((data - min) / (max - min)) - 1  # Scale to [-1, 1] range
+            del f[path]
+            f[path] = normalized_data
+
+        # Save the min and max values to log directory
+        with open(os.path.join(log_dir, "normalization_params.txt"), "w") as f:
+            f.write(f"min: {min}\n")
+            f.write(f"max: {max}\n")
+
+    return normalized_path
+
+def get_env_metadata_from_dataset(dataset_path, set_env_specific_obs_processors=True):
+    """
+    Retrieves env metadata from dataset.
+
+    Args:
+        dataset_path (str): path to dataset
+
+        set_env_specific_obs_processors (bool): environment might have custom rules for how to process
+            observations - if this flag is true, make sure ObsUtils will use these custom settings. This
+            is a good place to do this operation to make sure it happens before loading data, running a 
+            trained model, etc.
+
+    Returns:
+        env_meta (dict): environment metadata. Contains 3 keys:
+
+            :`'env_name'`: name of environment
+            :`'type'`: type of environment, should be a value in EB.EnvType
+            :`'env_kwargs'`: dictionary of keyword arguments to pass to environment constructor
+    """
+    dataset_path = os.path.expanduser(dataset_path)
+    f = h5py.File(dataset_path, "r")
+    env_meta = json.loads(f["data"].attrs["env_args"])
+    if "env_kwargs" in env_meta.keys():
+        if "env_lang" in env_meta["env_kwargs"]: del env_meta["env_kwargs"]["env_lang"]
+    else:
+        env_meta["env_kwargs"] = {}
+
+    f.close()
+    if set_env_specific_obs_processors:
+        # handle env-specific custom observation processing logic
+        EnvUtils.set_env_specific_obs_processing(env_meta=env_meta)
+    return env_meta
+
+def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: str):
+    """Train a model using the algorithm specified in config.
+
+    Args:
+        config: Configuration object.
+        device: PyTorch device to use for training.
+        log_dir: Directory to save logs.
+        ckpt_dir: Directory to save checkpoints.
+        video_dir: Directory to save videos.
+    """
     # first set seeds
     np.random.seed(config.train.seed)
     torch.manual_seed(config.train.seed)
@@ -83,7 +182,6 @@ def train(config, device):
     print("\n============= New Training Run with Config =============")
     print(config)
     print("")
-    log_dir, ckpt_dir, video_dir = TrainUtils.get_exp_dir(config)
 
     print(f">>> Saving logs into directory: {log_dir}")
     print(f">>> Saving checkpoints into directory: {ckpt_dir}")
@@ -102,14 +200,21 @@ def train(config, device):
     dataset_path = os.path.expanduser(config.train.data)
     if not os.path.exists(dataset_path):
         raise FileNotFoundError(f"Dataset at provided path {dataset_path} not found!")
+    
+    if isinstance(config.train.data, str):
+        with config.values_unlocked():
+            config.train.data = [{"path": config.train.data}]
 
     # load basic metadata from training file
     print("\n============= Loaded Environment Metadata =============")
-    env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=config.train.data)
-    shape_meta = FileUtils.get_shape_metadata_from_dataset(
-        dataset_path=config.train.data, all_obs_keys=config.all_obs_keys, verbose=True
-    )
+    env_meta = get_env_metadata_from_dataset(dataset_path=dataset_path)
 
+    shape_meta = FileUtils.get_shape_metadata_from_dataset(
+                    dataset_config=config.train.data[0],
+                    action_keys=config.train.action_keys,
+                    all_obs_keys=config.all_obs_keys,
+                    verbose=True
+                )
     if config.experiment.env is not None:
         env_meta["env_name"] = config.experiment.env
         print("=" * 30 + "\n" + "Replacing Env to {}\n".format(env_meta["env_name"]) + "=" * 30)
@@ -139,6 +244,31 @@ def train(config, device):
 
     # setup for a new training run
     data_logger = DataLogger(log_dir, config=config, log_tb=config.experiment.logging.log_tb)
+    # number of learning steps per epoch (defaults to a full dataset pass)
+    train_num_steps = config.experiment.epoch_every_n_steps
+    valid_num_steps = config.experiment.validation_epoch_every_n_steps
+
+    # add info to optim_params
+    with config.values_unlocked():
+        if "optim_params" in config.algo:
+            # add info to optim_params of each net
+            for k in config.algo.optim_params:
+                config.algo.optim_params[k]["num_train_batches"] = len(trainset) if train_num_steps is None else train_num_steps
+                config.algo.optim_params[k]["num_epochs"] = config.train.num_epochs
+        # handling for "hbc" and "iris" algorithms
+        if config.algo_name == "hbc":
+            for sub_algo in ["planner", "actor"]:
+                # add info to optim_params of each net
+                for k in config.algo[sub_algo].optim_params:
+                    config.algo[sub_algo].optim_params[k]["num_train_batches"] = len(trainset) if train_num_steps is None else train_num_steps
+                    config.algo[sub_algo].optim_params[k]["num_epochs"] = config.train.num_epochs
+        if config.algo_name == "iris":
+            for sub_algo in ["planner", "value"]:
+                # add info to optim_params of each net
+                for k in config.algo["value_planner"][sub_algo].optim_params:
+                    config.algo["value_planner"][sub_algo].optim_params[k]["num_train_batches"] = len(trainset) if train_num_steps is None else train_num_steps
+                    config.algo["value_planner"][sub_algo].optim_params[k]["num_epochs"] = config.train.num_epochs
+
     model = algo_factory(
         algo_name=config.algo_name,
         config=config,
@@ -219,7 +349,8 @@ def train(config, device):
                 and (epoch % config.experiment.save.every_n_epochs == 0)
             )
             epoch_list_check = epoch in config.experiment.save.epochs
-            should_save_ckpt = time_check or epoch_check or epoch_list_check
+            last_epoch_check = epoch == config.train.num_epochs
+            should_save_ckpt = time_check or epoch_check or epoch_list_check or last_epoch_check
         ckpt_reason = None
         if should_save_ckpt:
             last_ckpt_time = time.time()
@@ -278,21 +409,26 @@ def train(config, device):
     data_logger.close()
 
 
-def main(args):
-    """Train a model on a task using a specified algorithm."""
+def main(args: argparse.Namespace):
+    """Train a model on a task using a specified algorithm.
+
+    Args:
+        args: Command line arguments.
+    """
     # load config
     if args.task is not None:
         # obtain the configuration entry point
         cfg_entry_point_key = f"robomimic_{args.algo}_cfg_entry_point"
+        task_name = args.task.split(":")[-1]
 
-        print(f"Loading configuration for task: {args.task}")
+        print(f"Loading configuration for task: {task_name}")
         print(gym.envs.registry.keys())
         print(" ")
-        cfg_entry_point_file = gym.spec(args.task).kwargs.pop(cfg_entry_point_key)
+        cfg_entry_point_file = gym.spec(task_name).kwargs.pop(cfg_entry_point_key)
         # check if entry point exists
         if cfg_entry_point_file is None:
             raise ValueError(
-                f"Could not find configuration for the environment: '{args.task}'."
+                f"Could not find configuration for the environment: '{task_name}'."
                 f" Please check that the gym registry has the entry point: '{cfg_entry_point_key}'."
             )
 
@@ -312,8 +448,16 @@ def main(args):
     if args.name is not None:
         config.experiment.name = args.name
 
+    if args.epochs is not None:
+        config.train.num_epochs = args.epochs
+
     # change location of experiment directory
     config.train.output_dir = os.path.abspath(os.path.join("./logs", args.log_dir, args.task))
+
+    log_dir, ckpt_dir, video_dir, time_dir= TrainUtils.get_exp_dir(config)
+
+    if args.normalize_training_actions:
+        config.train.data = normalize_hdf5_actions(config, log_dir)
 
     # get torch device
     device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
@@ -323,7 +467,7 @@ def main(args):
     # catch error during training and print it
     res_str = "finished run successfully!"
     try:
-        train(config, device=device)
+        train(config, device, log_dir, ckpt_dir, video_dir)
     except Exception as e:
         res_str = f"run failed with error:\n{e}\n\n{traceback.format_exc()}"
     print(res_str)
@@ -344,13 +488,23 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        default=None,
+        default="/home/wgk/code/IsaacLab/datasets/dataset.hdf5",
         help="(optional) if provided, override the dataset path defined in the config",
     )
 
-    parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-    parser.add_argument("--algo", type=str, default=None, help="Name of the algorithm.")
+    parser.add_argument("--task", type=str, default="Isaac-Insert-Peg-Franka-Bimanual-IK-Abs-v0", help="Name of the task.")
+    parser.add_argument("--algo", type=str, default="diffusion_policy", help="Name of the algorithm.")
     parser.add_argument("--log_dir", type=str, default="robomimic", help="Path to log directory")
+    parser.add_argument("--normalize_training_actions", action="store_true", default=False, help="Normalize actions")
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=100,
+        help=(
+            "Optional: Number of training epochs. If specified, overrides the number of epochs from the JSON training"
+            " config."
+        ),
+    )
 
     args = parser.parse_args()
 
