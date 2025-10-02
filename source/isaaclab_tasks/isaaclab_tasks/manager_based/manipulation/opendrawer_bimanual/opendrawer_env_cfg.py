@@ -44,8 +44,19 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     # # Cameras
     wrist_cam_left: CameraCfg = MISSING
     wrist_cam_right: CameraCfg = MISSING
+
+    # tact_right_left: CameraCfg = MISSING
+    # tact_right_right: CameraCfg = MISSING
+    # tact_left_left: CameraCfg = MISSING
+    # tact_left_right: CameraCfg = MISSING
     
     table_cam: CameraCfg = MISSING
+
+
+    # camera_light_l_l: AssetBaseCfg = MISSING
+    # camera_light_l_r: AssetBaseCfg = MISSING
+    # camera_light_r_l: AssetBaseCfg = MISSING
+    # camera_light_r_r: AssetBaseCfg = MISSING
 
 
     # Table
@@ -203,7 +214,27 @@ class ObservationsCfg:
         zed_right = ObsTerm(
             func=mdp.image, params={"sensor_cfg": SceneEntityCfg("zed_right"), "data_type": "rgb", "normalize": False}
         )
+        zed_middle = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("zed_middle"), "data_type": "rgb", "normalize": False}
+        )
 
+        # 深度
+        wrist_cam_left_depth = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("wrist_cam_left"), "data_type": "distance_to_image_plane", "normalize": False}
+        )
+        wrist_cam_right_depth = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("wrist_cam_right"), "data_type": "distance_to_image_plane", "normalize": False}
+        )
+        zed_left_depth = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("zed_left"), "data_type": "distance_to_image_plane", "normalize": False}
+        )
+        zed_right_depth = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("zed_right"), "data_type": "distance_to_image_plane", "normalize": False}
+        )        
+        zed_middle_depth = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("zed_middle"), "data_type": "distance_to_image_plane", "normalize": False}
+        )
+        
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = False

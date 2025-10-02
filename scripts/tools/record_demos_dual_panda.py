@@ -37,14 +37,14 @@ from isaaclab.app import AppLauncher
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Record demonstrations for Isaac Lab environments.")
 #parser.add_argument("--task", type=str, default="Isaac-Stack-Cube-Franka-Bimanual-IK-Abs-v0", help="Name of the task.")
-parser.add_argument("--task", type=str, default="Isaac-Open-Drawer-Franka-Bimanual-IK-Abs-v0", help="Name of the task.")
+parser.add_argument("--task", type=str, default="Isaac-Open-Drawer-Franka-Bimanual-Tact-IK-Abs-v0", help="Name of the task.")
 parser.add_argument("--teleop_device", type=str, default="meta_quest", help="Device for interacting with environment.")
 parser.add_argument(
     "--dataset_file", type=str, default="datasets/dataset.hdf5", help="File path to export recorded demos."
 )
 parser.add_argument("--step_hz", type=int, default=30, help="Environment stepping rate in Hz.")
 parser.add_argument(
-    "--num_demos", type=int, default=5, help="Number of demonstrations to record. Set to 0 for infinite."
+    "--num_demos", type=int, default=1, help="Number of demonstrations to record. Set to 0 for infinite."
 )
 parser.add_argument(
     "--num_success_steps",

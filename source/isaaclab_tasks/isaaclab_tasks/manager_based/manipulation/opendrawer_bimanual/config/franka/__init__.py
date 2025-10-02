@@ -9,6 +9,7 @@ from . import (
     agents,
     opendrawer_ik_abs_env_cfg,
     opendrawer_joint_pos_env_cfg,
+    opendrawer_ik_abs_tact_env_cfg
 )
 
 ##
@@ -20,14 +21,15 @@ from . import (
 ##
 
 gym.register(
-    id="Isaac-Open-Drawer-Franka-Bimanual-v0",
+    id="Isaac-Open-Drawer-Franka-Bimanual-Tact-IK-Abs-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     kwargs={
-        "env_cfg_entry_point": opendrawer_joint_pos_env_cfg.FrankaOpenDrawerEnvCfg,
+        "env_cfg_entry_point": opendrawer_ik_abs_tact_env_cfg.FrankaOpenDrawerEnvCfg, # 环境入口
+        "robomimic_bc_cfg_entry_point": os.path.join(agents.__path__[0], "robomimic/bc_rnn_low_dim.json"),  # 算法入口
+        "robomimic_diffusion_policy_cfg_entry_point": os.path.join(agents.__path__[0], "robomimic/dp_unet_image.json"),  # 算法入口
     },
     disable_env_checker=True,
 )
-
  
 
 ##
